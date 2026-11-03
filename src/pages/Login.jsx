@@ -6,12 +6,12 @@ import { useTheme } from "../context/ThemeContext"
 import { Sprout, Eye, EyeOff, Mail, Lock, ArrowLeft } from "lucide-react"
 export default function Login() {
   const navigate = useNavigate()
-  const { notify, showDetail } = useFeedback()
+  const { showDetail } = useFeedback()
   const [error, setError] = useState("")
   const { login } = useAuth()
   const { isDark } = useTheme()
-  const [email, setEmail] = useState("marcus@greenfield.farm")
-  const [password, setPassword] = useState("••••••••")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
   const surface = isDark ? "#1A2A1A" : "#FFFFFF"
@@ -32,9 +32,14 @@ export default function Login() {
       return
     }
     setLoading(true)
-    await new Promise((r) => setTimeout(r, 800))
-    login(email, password)
-    navigate("/dashboard")
+    try {
+      await login(email.trim(), password)
+      navigate("/dashboard")
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setLoading(false)
+    }
   }
   return (
     <div
@@ -263,65 +268,6 @@ export default function Login() {
             </p>
           </div>
 
-          {/* Social login */}
-          <div
-            data-grid="1fr1fr"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 10,
-              marginBottom: 24,
-            }}
-          >
-            {["Google", "Apple"].map((provider) => (
-              <button
-                key={provider}
-                onClick={() => {
-                  login(provider.toLowerCase() + "@demo.invalid", "demo-only")
-                  notify(
-                    provider +
-                      " demo sign-in complete. No external authentication used.",
-                  )
-                  navigate("/dashboard")
-                }}
-                style={{
-                  padding: "10px",
-                  borderRadius: 10,
-                  background: inputBg,
-                  border: `1px solid ${border}`,
-                  cursor: "pointer",
-                  fontSize: 14,
-                  fontWeight: 500,
-                  color: text,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 6,
-                }}
-              >
-                <span style={{ fontSize: 16 }}>
-                  {provider === "Google" ? "G" : ""}
-                </span>
-                {provider}
-              </button>
-            ))}
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              marginBottom: 24,
-            }}
-          >
-            <div style={{ flex: 1, height: 1, background: border }} />
-            <span style={{ fontSize: 12, color: muted }}>
-              or continue with email
-            </span>
-            <div style={{ flex: 1, height: 1, background: border }} />
-          </div>
-
           <form
             noValidate
             onSubmit={(e) => {
@@ -401,8 +347,8 @@ export default function Login() {
                     type="button"
                     onClick={() =>
                       showDetail(
-                        "Demo password help",
-                        "This is a frontend demonstration. Sign in with any valid email and a password of at least eight characters. No account or reset email is created.",
+                        "Password reset",
+                        "Password reset is not configured yet. Contact the project administrator if you cannot access your account.",
                       )
                     }
                     style={{

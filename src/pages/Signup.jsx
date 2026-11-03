@@ -17,7 +17,7 @@ export default function Signup() {
   const navigate = useNavigate()
   const { notify, showDetail } = useFeedback()
   const [error, setError] = useState("")
-  const { login } = useAuth()
+  const { signup } = useAuth()
   const { isDark } = useTheme()
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
@@ -46,9 +46,14 @@ export default function Signup() {
       return
     }
     setLoading(true)
-    await new Promise((r) => setTimeout(r, 900))
-    login(email.trim(), password, name.trim())
-    navigate("/dashboard")
+    try {
+      await signup(name.trim(), email.trim(), password)
+      navigate("/dashboard")
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setLoading(false)
+    }
   }
   return (
     <div

@@ -14,6 +14,7 @@ import { useFarm } from "../../context/FarmContext"
 import { useTheme } from "../../context/ThemeContext"
 import { useFeedback } from "../../context/FeedbackContext"
 import { readStored, writeStored } from "../../data/browserStorage"
+import { apiRequest } from "../../data/api"
 import Field from "../ui/Field"
 import Toggle from "../ui/Toggle"
 import PanelCard from "../ui/PanelCard"
@@ -36,7 +37,22 @@ export default function SettingsPanel() {
   const [farmName, setFarmName] = useState(farm.name)
   const [location, setLocation] = useState(farm.location)
   const [area, setArea] = useState(String(farm.area))
+  const [areaUnit, setAreaUnit] = useState("acre")
+  const [latitude, setLatitude] = useState("")
+  const [longitude, setLongitude] = useState("")
+  const [backendFarmId, setBackendFarmId] = useState(null)
+  const [backendZones, setBackendZones] = useState([])
+  const [farmLoading, setFarmLoading] = useState(true)
+  const [savingFarm, setSavingFarm] = useState(false)
+  const [farmError, setFarmError] = useState("")
+  const [farmStatus, setFarmStatus] = useState("")
+  const [zoneName, setZoneName] = useState("")
+  const [zoneCrop, setZoneCrop] = useState("")
+  const [zoneArea, setZoneArea] = useState("")
+  const [zoneError, setZoneError] = useState("")
+  const [savingZone, setSavingZone] = useState(false)
   const [error, setError] = useState("")
+  const [savingProfile, setSavingProfile] = useState(false)
   const [notifications, setNotifications] = useState(() =>
     readStored("notifications", {
       weather: true,
@@ -58,6 +74,52 @@ export default function SettingsPanel() {
   useEffect(() => {
     writeStored("integrations", integrations)
   }, [integrations])
+  useEffect(() => {
+    let active = true
+    async function loadFarm() {
+      setFarmLoading(true)
+      try {
+        const { farms } = await apiRequest("/farms")
+        if (!active) return
+        const selectedFarm = farms[0]
+        if (!selectedFarm) {
+          setBackendFarmId(null)
+          setBackendZones([])
+          setFarmName("")
+          setLocation("")
+          setArea("")
+          setAreaUnit("acre")
+          setLatitude("")
+          setLongitude("")
+          return
+        }
+        const id = selectedFarm._id
+        setBackendFarmId(id)
+        setFarmName(selectedFarm.name)
+        setLocation(selectedFarm.locationLabel || "")
+        setArea(selectedFarm.area == null ? "" : String(selectedFarm.area))
+        setAreaUnit(selectedFarm.areaUnit || "acre")
+        setLatitude(String(selectedFarm.coordinates.latitude))
+        setLongitude(String(selectedFarm.coordinates.longitude))
+        updateFarm({
+          id,
+          name: selectedFarm.name,
+          location: selectedFarm.locationLabel || "",
+          area: selectedFarm.area ?? "",
+          areaUnit: selectedFarm.areaUnit,
+          coordinates: selectedFarm.coordinates,
+        })
+        const { zones } = await apiRequest(`/farms/${id}/zones`)
+        if (active) setBackendZones(zones)
+      } catch (requestError) {
+        if (active) setFarmError(requestError.message)
+      } finally {
+        if (active) setFarmLoading(false)
+      }
+    }
+    void loadFarm()
+    return () => { active = false }
+  }, [updateFarm])
   const inputGrid = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }
   const saveStyle = {
     display: "inline-flex",
@@ -168,13 +230,13 @@ export default function SettingsPanel() {
                   {user?.name || "Marcus Chen"}
                 </p>
                 <p style={{ color: p.muted, fontSize: 12 }}>
-                  Farm Owner · Demo account
+              Farm Owner
                 </p>
               </div>
             </div>
             <form
               noValidate
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault()
                 if (
                   name.trim().length < 2 ||
@@ -183,9 +245,16 @@ export default function SettingsPanel() {
                   setError("Enter a full name and a valid email address.")
                   return
                 }
-                updateProfile(name.trim(), email.trim())
-                setError("")
-                notify("Profile saved in this browser.")
+                setSavingProfile(true)
+                try {
+                  await updateProfile(name.trim(), email.trim())
+                  setError("")
+                  notify("Profile saved.")
+                } catch (requestError) {
+                  setError(requestError.message)
+                } finally {
+                  setSavingProfile(false)
+                }
               }}
             >
               <div style={inputGrid}>
@@ -211,9 +280,9 @@ export default function SettingsPanel() {
                   {error}
                 </p>
               )}
-              <button style={saveStyle}>
+              <button style={saveStyle} disabled={savingProfile}>
                 <Save size={14} />
-                Save Changes
+                {savingProfile ? "Saving…" : "Save Changes"}
               </button>
             </form>
           </PanelCard>
@@ -230,28 +299,55 @@ export default function SettingsPanel() {
             >
               Farm Details
             </h2>
+            <p style={{ color: p.muted, fontSize: 13, marginBottom: 20 }}>
+              Save the farm coordinates used to request weather for this location. Enter latitude and longitude in decimal degrees.
+            </p>
             <form
               noValidate
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault()
-                if (
-                  !farmName.trim() ||
-                  !location.trim() ||
-                  !Number.isFinite(Number(area)) ||
-                  Number(area) <= 0
-                ) {
-                  setError(
-                    "Enter a farm name, location, and positive farm area.",
-                  )
+                setFarmError("")
+                setFarmStatus("")
+                const lat = Number(latitude)
+                const lng = Number(longitude)
+                if (!farmName.trim() || !area.trim() || !Number.isFinite(Number(area)) || Number(area) <= 0) {
+                  setFarmError("Enter a farm name and a positive farm area.")
                   return
                 }
-                updateFarm({
+                if (!latitude.trim() || !longitude.trim() || !Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+                  setFarmError("Enter valid coordinates: latitude from -90 to 90 and longitude from -180 to 180.")
+                  return
+                }
+                const payload = {
                   name: farmName.trim(),
-                  location: location.trim(),
+                  locationLabel: location.trim(),
+                  coordinates: { latitude: lat, longitude: lng },
+                  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
                   area: Number(area),
-                })
-                setError("")
-                notify("Farm details saved in this browser.")
+                  areaUnit,
+                }
+                setSavingFarm(true)
+                try {
+                  const result = backendFarmId
+                    ? await apiRequest(`/farms/${backendFarmId}`, { method: "PATCH", body: JSON.stringify(payload) })
+                    : await apiRequest("/farms", { method: "POST", body: JSON.stringify(payload) })
+                  const savedFarm = result.farm
+                  setBackendFarmId(savedFarm._id)
+                  updateFarm({
+                    id: savedFarm._id,
+                    name: savedFarm.name,
+                    location: savedFarm.locationLabel,
+                    area: savedFarm.area,
+                    areaUnit: savedFarm.areaUnit,
+                    coordinates: savedFarm.coordinates,
+                  })
+                  setFarmStatus("Farm saved to your AgriSense account.")
+                  notify("Farm saved to your account.")
+                } catch (requestError) {
+                  setFarmError(requestError.message)
+                } finally {
+                  setSavingFarm(false)
+                }
               }}
             >
               <div style={inputGrid}>
@@ -265,29 +361,133 @@ export default function SettingsPanel() {
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
                 />
+                <div>
+                  <Field
+                    label={`Farm area (${areaUnit})`}
+                    type="number"
+                    min="0.1"
+                    step="0.1"
+                    value={area}
+                    onChange={(e) => setArea(e.target.value)}
+                  />
+                  <label style={{ display: "block", color: p.text, fontSize: 12, marginTop: 10 }}>
+                    Area unit
+                    <select
+                      value={areaUnit}
+                      onChange={(e) => setAreaUnit(e.target.value)}
+                      style={{ display: "block", width: "100%", marginTop: 6, padding: "10px 12px", borderRadius: 10, border: `1px solid ${p.border}`, background: p.isDark ? "#223022" : "#F8FAF7", color: p.text }}
+                    >
+                      <option value="acre">Acres</option>
+                      <option value="ha">Hectares</option>
+                    </select>
+                  </label>
+                </div>
                 <Field
-                  label="Farm area (acres)"
+                  label="Latitude"
                   type="number"
-                  min="0.1"
-                  step="0.1"
-                  value={area}
-                  onChange={(e) => setArea(e.target.value)}
+                  min="-90"
+                  max="90"
+                  step="any"
+                  value={latitude}
+                  onChange={(e) => setLatitude(e.target.value)}
+                  placeholder="e.g. 19.0760"
                 />
-                <Field label="Farm zones" value="4 monitored zones" readOnly />
+                <Field
+                  label="Longitude"
+                  type="number"
+                  min="-180"
+                  max="180"
+                  step="any"
+                  value={longitude}
+                  onChange={(e) => setLongitude(e.target.value)}
+                  placeholder="e.g. 72.8777"
+                />
               </div>
-              {error && (
+              {farmError && (
                 <p
                   role="alert"
                   style={{ marginTop: 16, color: "#E53935", fontSize: 13 }}
                 >
-                  {error}
+                  {farmError}
                 </p>
               )}
-              <button style={saveStyle}>
+              {farmStatus && (
+                <p role="status" style={{ marginTop: 16, color: "#2E7D32", fontSize: 13 }}>
+                  {farmStatus}
+                </p>
+              )}
+              <button style={saveStyle} disabled={farmLoading || savingFarm}>
                 <Save size={14} />
-                Save Farm Details
+                {farmLoading ? "Loading farm…" : savingFarm ? "Saving…" : backendFarmId ? "Update Farm" : "Save Farm"}
               </button>
             </form>
+            <div style={{ borderTop: `1px solid ${p.border}`, marginTop: 28, paddingTop: 24 }}>
+              <h3 style={{ color: p.text, fontWeight: 700, fontSize: 15, marginBottom: 8 }}>
+                Farm zones ({backendZones.length})
+              </h3>
+              <p style={{ color: p.muted, fontSize: 13, marginBottom: 16 }}>
+                Zones are saved under this farm. Field boundaries can be added later for satellite analysis.
+              </p>
+              {backendZones.length > 0 && (
+                <ul style={{ color: p.text, fontSize: 13, paddingLeft: 20, margin: "0 0 18px" }}>
+                  {backendZones.map((zone) => (
+                    <li key={zone._id} style={{ marginBottom: 6 }}>
+                      {zone.name}{zone.crop ? ` · ${zone.crop}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <form
+                noValidate
+                onSubmit={async (e) => {
+                  e.preventDefault()
+                  setZoneError("")
+                  if (!backendFarmId) {
+                    setZoneError("Save the farm before adding zones.")
+                    return
+                  }
+                  if (!zoneName.trim()) {
+                    setZoneError("Enter a zone name.")
+                    return
+                  }
+                  if (zoneArea && (!Number.isFinite(Number(zoneArea)) || Number(zoneArea) <= 0)) {
+                    setZoneError("Zone area must be a positive number.")
+                    return
+                  }
+                  setSavingZone(true)
+                  try {
+                    const result = await apiRequest(`/farms/${backendFarmId}/zones`, {
+                      method: "POST",
+                      body: JSON.stringify({
+                        name: zoneName.trim(),
+                        crop: zoneCrop.trim(),
+                        ...(zoneArea ? { area: Number(zoneArea), areaUnit } : {}),
+                      }),
+                    })
+                    setBackendZones((current) => [...current, result.zone])
+                    setZoneName("")
+                    setZoneCrop("")
+                    setZoneArea("")
+                    notify("Zone saved to your account.")
+                  } catch (requestError) {
+                    setZoneError(requestError.message)
+                  } finally {
+                    setSavingZone(false)
+                  }
+                }}
+              >
+                <div style={inputGrid}>
+                  <Field label="Zone name" value={zoneName} onChange={(e) => setZoneName(e.target.value)} placeholder="North field" />
+                  <Field label="Crop (optional)" value={zoneCrop} onChange={(e) => setZoneCrop(e.target.value)} placeholder="Rice" />
+                  <Field label={`Zone area in ${areaUnit} (optional)`} type="number" min="0.1" step="0.1" value={zoneArea} onChange={(e) => setZoneArea(e.target.value)} />
+                </div>
+                {zoneError && <p role="alert" style={{ marginTop: 16, color: "#E53935", fontSize: 13 }}>{zoneError}</p>}
+                <button style={saveStyle} disabled={!backendFarmId || savingZone}>
+                  <Sprout size={14} />
+                  {savingZone ? "Saving zone…" : "Add Zone"}
+                </button>
+              </form>
+            </div>
           </PanelCard>
         )}
         {tab === "notifications" && (
