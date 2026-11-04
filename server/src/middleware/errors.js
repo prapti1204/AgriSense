@@ -13,7 +13,7 @@ export function errorHandler(error, _req, res, _next) {
   res.status(status).json({
     error: {
       code: error.code || (["ValidationError", "CastError"].includes(error.name) ? "VALIDATION_ERROR" : "INTERNAL_ERROR"),
-      message: status >= 500 ? "An unexpected server error occurred." : error.message,
+      message: error instanceof HttpError ? error.message : (status >= 500 ? "An unexpected server error occurred." : error.message),
       ...(error.details ? { details: error.details } : {}),
     },
   })

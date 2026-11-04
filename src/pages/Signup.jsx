@@ -443,8 +443,8 @@ export default function Signup() {
               type="button"
               onClick={() =>
                 showDetail(
-                  "Demo terms",
-                  "AgriSense is a frontend demonstration with mock data. This form creates only a demo profile in your browser.",
+                  "Terms of Service (placeholder)",
+                  "AgriSense is a project-stage application. Formal Terms of Service have not yet been drafted. By using this application you agree to use it responsibly and acknowledge that it is provided without warranty. Do not enter confidential business data until full terms are published.",
                 )
               }
               style={{
@@ -462,8 +462,8 @@ export default function Signup() {
               type="button"
               onClick={() =>
                 showDetail(
-                  "Demo privacy",
-                  "Your profile and farm preferences stay in this browser. Passwords and plant images are not stored or transmitted.",
+                  "Privacy Policy (placeholder)",
+                  "AgriSense stores your account credentials, farm details, soil readings, and uploaded plant images on a private MongoDB database. Data is not shared with third parties. Formal privacy policy documentation has not yet been completed. A full policy will be published before any public launch.",
                 )
               }
               style={{

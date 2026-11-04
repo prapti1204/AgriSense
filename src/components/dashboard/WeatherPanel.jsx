@@ -11,9 +11,9 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts"
-import { apiRequest } from "../../data/api"
 import { usePalette } from "../ui/usePalette"
 import { useTheme } from "../../context/ThemeContext"
+import { useFarm } from "../../context/FarmContext"
 import WeatherIcon from "../ui/WeatherIcon"
 
 function describeWeather(code) {
@@ -41,33 +41,42 @@ function hourLabel(dateTime) {
 export default function WeatherPanel() {
   const { isDark } = useTheme()
   const { surface, border, text, muted } = usePalette()
-  const [farm, setFarm] = useState(null)
+  const { farm, hasFarm, getFarmWeather, isLoading: farmLoading } = useFarm()
   const [weather, setWeather] = useState(null)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(true)
   const [reloadKey, setReloadKey] = useState(0)
 
   const loadWeather = useCallback(async () => {
+    if (farmLoading) return
     setLoading(true)
     setError("")
     setWeather(null)
+    if (!hasFarm) {
+      setError("Add a farm with its location in Settings → Farm Details to view weather.")
+      setLoading(false)
+      return
+    }
+    const lat = farm?.coordinates?.latitude
+    const lon = farm?.coordinates?.longitude
+    if (lat == null || lon == null) {
+      setError("Please configure valid coordinates in Settings → Farm Details to view weather.")
+      setLoading(false)
+      return
+    }
     try {
-      const { farms } = await apiRequest("/farms")
-      const selectedFarm = farms[0]
-      if (!selectedFarm) {
-        setFarm(null)
-        setError("Add a farm with its location in Settings → Farm Details to view weather.")
+      const result = await getFarmWeather()
+      if (!result?.weather) {
+        setError("Weather data could not be retrieved for this farm.")
         return
       }
-      setFarm(selectedFarm)
-      const result = await apiRequest(`/farms/${selectedFarm._id}/weather`)
       setWeather(result.weather)
     } catch (requestError) {
       setError(requestError.message || "Could not load weather for this farm.")
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [hasFarm, farm, farmLoading, getFarmWeather])
 
   useEffect(() => {
     void loadWeather()
@@ -111,7 +120,7 @@ export default function WeatherPanel() {
             Weather Monitoring
           </h1>
           <p style={{ color: muted, fontSize: 14, marginBottom: 24 }}>
-            {farm ? `Weather for ${farm.name}${farm.locationLabel ? ` · ${farm.locationLabel}` : ""}` : "Weather for your saved farm"}
+            {hasFarm ? `Weather for ${farm.name}${farm.location ? ` · ${farm.location}` : ""}` : "Weather for your saved farm"}
           </p>
         </div>
         <button
@@ -129,7 +138,7 @@ export default function WeatherPanel() {
       {!loading && error && (
         <div role="alert" style={{ ...cardStyle, color: text }}>
           <p style={{ color: error.includes("Add a farm") ? muted : "#E53935", marginBottom: 12 }}>{error}</p>
-          {farm && <p style={{ color: muted, fontSize: 12 }}>Check that the API is running and your saved farm has valid coordinates.</p>}
+          {hasFarm && <p style={{ color: muted, fontSize: 12 }}>Check that the API is running and your saved farm has valid coordinates.</p>}
         </div>
       )}
 
