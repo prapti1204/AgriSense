@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai"
 import { z } from "zod"
 import { env } from "../config/env.js"
 import { HttpError } from "../lib/httpError.js"
+import { handleGeminiError, withGeminiRetry } from "../lib/geminiError.js"
 
 const cropRecommendationSchema = {
   type: "object",
@@ -40,18 +41,26 @@ export async function recommendCrops(input) {
   if (!env.GEMINI_API_KEY) {
     throw new HttpError(503, "PREDICTION_NOT_CONFIGURED", "Gemini is not configured. Set GEMINI_API_KEY on the server.")
   }
-  const client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY })
-  const response = await client.models.generateContent({
-    model: env.GEMINI_MODEL,
-    contents: [
-      "Act as a cautious agricultural decision-support assistant. Recommend crops only from the supplied farm data. Do not invent soil measurements or local market facts. Return insufficient_data when essential information is missing, and uncertain where the evidence is weak. Suitability is a qualitative score from 0 to 1, not a calibrated probability. Do not provide chemical treatment or dosage advice.\n\nFarm data:\n",
-      JSON.stringify(input),
-    ].join(""),
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: cropRecommendationSchema,
-    },
-  })
+
+  let response
+  try {
+    const client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY })
+    response = await withGeminiRetry(() =>
+      client.models.generateContent({
+        model: env.GEMINI_MODEL,
+        contents: [
+          "Act as a cautious agricultural decision-support assistant. Recommend crops only from the supplied farm data. Do not invent soil measurements or local market facts. Return insufficient_data when essential information is missing, and uncertain where the evidence is weak. Suitability is a qualitative score from 0 to 1, not a calibrated probability. Do not provide chemical treatment or dosage advice.\n\nFarm data:\n",
+          JSON.stringify(input),
+        ].join(""),
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: cropRecommendationSchema,
+        },
+      })
+    )
+  } catch (apiError) {
+    throw handleGeminiError(apiError)
+  }
 
   let result
   try {

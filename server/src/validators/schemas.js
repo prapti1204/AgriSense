@@ -45,6 +45,10 @@ export const zoneCreateSchema = z.object({
   area: z.coerce.number().positive().optional(),
   areaUnit: z.enum(["ha", "acre"]).optional().default("ha"),
   geometry: z.union([pointSchema, polygonSchema]).optional(),
+  irrigation: z.object({
+    desiredMode: z.enum(["manual", "scheduled"]).optional(),
+    targetLitres: z.number().min(0).nullable().optional(),
+  }).optional(),
 })
 export const zonePatchSchema = zoneCreateSchema.partial().refine((value) => Object.keys(value).length > 0)
 

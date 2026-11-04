@@ -28,21 +28,20 @@ const tabs = [
 export default function SettingsPanel() {
   const p = usePalette()
   const { user, updateProfile } = useAuth()
-  const { farm, updateFarm } = useFarm()
+  const { farm, rawZones, saveFarm, createZone, updateZone, isLoading: farmLoading, hasFarm } = useFarm()
   const { toggleTheme } = useTheme()
   const { notify } = useFeedback()
   const [tab, setTab] = useState("profile")
   const [name, setName] = useState(user?.name || "Marcus Chen")
   const [email, setEmail] = useState(user?.email || "marcus@greenfield.farm")
-  const [farmName, setFarmName] = useState(farm.name)
-  const [location, setLocation] = useState(farm.location)
-  const [area, setArea] = useState(String(farm.area))
-  const [areaUnit, setAreaUnit] = useState("acre")
-  const [latitude, setLatitude] = useState("")
-  const [longitude, setLongitude] = useState("")
-  const [backendFarmId, setBackendFarmId] = useState(null)
-  const [backendZones, setBackendZones] = useState([])
-  const [farmLoading, setFarmLoading] = useState(true)
+  const [farmName, setFarmName] = useState(farm?.name || "")
+  const [location, setLocation] = useState(farm?.location || "")
+  const [area, setArea] = useState(farm?.area ? String(farm.area) : "")
+  const [areaUnit, setAreaUnit] = useState(farm?.areaUnit || "acre")
+  const [latitude, setLatitude] = useState(farm?.coordinates?.latitude ? String(farm.coordinates.latitude) : "")
+  const [longitude, setLongitude] = useState(farm?.coordinates?.longitude ? String(farm.coordinates.longitude) : "")
+  const backendFarmId = hasFarm && farm ? (farm._id || farm.id || null) : null
+  const backendZones = rawZones || []
   const [savingFarm, setSavingFarm] = useState(false)
   const [farmError, setFarmError] = useState("")
   const [farmStatus, setFarmStatus] = useState("")
@@ -51,8 +50,35 @@ export default function SettingsPanel() {
   const [zoneArea, setZoneArea] = useState("")
   const [zoneError, setZoneError] = useState("")
   const [savingZone, setSavingZone] = useState(false)
+  const [editingZoneId, setEditingZoneId] = useState(null)
+  const [editZoneCrop, setEditZoneCrop] = useState("")
+  const [editZoneArea, setEditZoneArea] = useState("")
+  const [savingEditZone, setSavingEditZone] = useState(false)
   const [error, setError] = useState("")
   const [savingProfile, setSavingProfile] = useState(false)
+
+  useEffect(() => {
+    if (farm && farm.exists) {
+      setFarmName(farm.name || "")
+      setLocation(farm.location || "")
+      setArea(farm.area ? String(farm.area) : "")
+      setAreaUnit(farm.areaUnit || "acre")
+      if (farm.coordinates) {
+        setLatitude(farm.coordinates.latitude != null ? String(farm.coordinates.latitude) : "")
+        setLongitude(farm.coordinates.longitude != null ? String(farm.coordinates.longitude) : "")
+      } else {
+        setLatitude("")
+        setLongitude("")
+      }
+    } else {
+      setFarmName("")
+      setLocation("")
+      setArea("")
+      setAreaUnit("acre")
+      setLatitude("")
+      setLongitude("")
+    }
+  }, [farm])
   const [notifications, setNotifications] = useState(() =>
     readStored("notifications", {
       weather: true,
@@ -74,52 +100,6 @@ export default function SettingsPanel() {
   useEffect(() => {
     writeStored("integrations", integrations)
   }, [integrations])
-  useEffect(() => {
-    let active = true
-    async function loadFarm() {
-      setFarmLoading(true)
-      try {
-        const { farms } = await apiRequest("/farms")
-        if (!active) return
-        const selectedFarm = farms[0]
-        if (!selectedFarm) {
-          setBackendFarmId(null)
-          setBackendZones([])
-          setFarmName("")
-          setLocation("")
-          setArea("")
-          setAreaUnit("acre")
-          setLatitude("")
-          setLongitude("")
-          return
-        }
-        const id = selectedFarm._id
-        setBackendFarmId(id)
-        setFarmName(selectedFarm.name)
-        setLocation(selectedFarm.locationLabel || "")
-        setArea(selectedFarm.area == null ? "" : String(selectedFarm.area))
-        setAreaUnit(selectedFarm.areaUnit || "acre")
-        setLatitude(String(selectedFarm.coordinates.latitude))
-        setLongitude(String(selectedFarm.coordinates.longitude))
-        updateFarm({
-          id,
-          name: selectedFarm.name,
-          location: selectedFarm.locationLabel || "",
-          area: selectedFarm.area ?? "",
-          areaUnit: selectedFarm.areaUnit,
-          coordinates: selectedFarm.coordinates,
-        })
-        const { zones } = await apiRequest(`/farms/${id}/zones`)
-        if (active) setBackendZones(zones)
-      } catch (requestError) {
-        if (active) setFarmError(requestError.message)
-      } finally {
-        if (active) setFarmLoading(false)
-      }
-    }
-    void loadFarm()
-    return () => { active = false }
-  }, [updateFarm])
   const inputGrid = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }
   const saveStyle = {
     display: "inline-flex",
@@ -302,6 +282,21 @@ export default function SettingsPanel() {
             <p style={{ color: p.muted, fontSize: 13, marginBottom: 20 }}>
               Save the farm coordinates used to request weather for this location. Enter latitude and longitude in decimal degrees.
             </p>
+            {!farmLoading && !backendFarmId && (
+              <div
+                style={{
+                  background: p.isDark ? "#1C2E1C" : "#E8F5E9",
+                  border: `1px solid ${p.isDark ? "#2E5A2E" : "#C8E6C9"}`,
+                  borderRadius: 12,
+                  padding: "12px 16px",
+                  marginBottom: 20,
+                  color: p.text,
+                  fontSize: 13,
+                }}
+              >
+                <strong>No farm registered yet.</strong> Enter your farm details and coordinates below to create your farm and enable live weather and field monitoring.
+              </div>
+            )}
             <form
               noValidate
               onSubmit={async (e) => {
@@ -319,6 +314,7 @@ export default function SettingsPanel() {
                   return
                 }
                 const payload = {
+                  ...(backendFarmId ? { id: backendFarmId } : {}),
                   name: farmName.trim(),
                   locationLabel: location.trim(),
                   coordinates: { latitude: lat, longitude: lng },
@@ -328,20 +324,8 @@ export default function SettingsPanel() {
                 }
                 setSavingFarm(true)
                 try {
-                  const result = backendFarmId
-                    ? await apiRequest(`/farms/${backendFarmId}`, { method: "PATCH", body: JSON.stringify(payload) })
-                    : await apiRequest("/farms", { method: "POST", body: JSON.stringify(payload) })
-                  const savedFarm = result.farm
-                  setBackendFarmId(savedFarm._id)
-                  updateFarm({
-                    id: savedFarm._id,
-                    name: savedFarm.name,
-                    location: savedFarm.locationLabel,
-                    area: savedFarm.area,
-                    areaUnit: savedFarm.areaUnit,
-                    coordinates: savedFarm.coordinates,
-                  })
-                  setFarmStatus("Farm saved to your AgriSense account.")
+                  await saveFarm(payload)
+                  setFarmStatus(backendFarmId ? "Farm details updated." : "Farm created and saved to your AgriSense account.")
                   notify("Farm saved to your account.")
                 } catch (requestError) {
                   setFarmError(requestError.message)
@@ -418,7 +402,7 @@ export default function SettingsPanel() {
               )}
               <button style={saveStyle} disabled={farmLoading || savingFarm}>
                 <Save size={14} />
-                {farmLoading ? "Loading farm…" : savingFarm ? "Saving…" : backendFarmId ? "Update Farm" : "Save Farm"}
+                {farmLoading ? "Loading farm…" : savingFarm ? "Saving…" : backendFarmId ? "Update Farm" : "Create Farm"}
               </button>
             </form>
             <div style={{ borderTop: `1px solid ${p.border}`, marginTop: 28, paddingTop: 24 }}>
@@ -429,13 +413,122 @@ export default function SettingsPanel() {
                 Zones are saved under this farm. Field boundaries can be added later for satellite analysis.
               </p>
               {backendZones.length > 0 && (
-                <ul style={{ color: p.text, fontSize: 13, paddingLeft: 20, margin: "0 0 18px" }}>
-                  {backendZones.map((zone) => (
-                    <li key={zone._id} style={{ marginBottom: 6 }}>
-                      {zone.name}{zone.crop ? ` · ${zone.crop}` : ""}
-                    </li>
-                  ))}
-                </ul>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+                  {backendZones.map((zone) => {
+                    const zId = zone._id || zone.id
+                    const isEditing = editingZoneId === zId
+
+                    return (
+                      <div
+                        key={zId}
+                        style={{
+                          background: p.isDark ? "#1C2E1C" : "#F8FAF7",
+                          border: `1px solid ${p.border}`,
+                          borderRadius: 12,
+                          padding: "12px 16px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 10,
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <div>
+                            <span style={{ fontWeight: 700, color: p.text, fontSize: 14 }}>{zone.name}</span>
+                            <span style={{ color: p.muted, fontSize: 13, marginLeft: 8 }}>
+                              {zone.crop ? `Crop: ${zone.crop}` : "No crop assigned"}
+                              {zone.area ? ` · ${zone.area} ${zone.areaUnit || areaUnit}` : " · Area not set"}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isEditing) {
+                                setEditingZoneId(null)
+                              } else {
+                                setEditingZoneId(zId)
+                                setEditZoneCrop(zone.crop || "")
+                                setEditZoneArea(zone.area != null ? String(zone.area) : "")
+                              }
+                            }}
+                            style={{
+                              background: "transparent",
+                              border: `1px solid ${p.border}`,
+                              color: p.text,
+                              borderRadius: 8,
+                              padding: "4px 10px",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {isEditing ? "Cancel" : "Edit"}
+                          </button>
+                        </div>
+
+                        {isEditing && (
+                          <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", paddingTop: 8, borderTop: `1px dashed ${p.border}` }}>
+                            <div style={{ flex: 1, minWidth: 140 }}>
+                              <Field
+                                label="Crop species"
+                                value={editZoneCrop}
+                                onChange={(e) => setEditZoneCrop(e.target.value)}
+                                placeholder="Rice, Wheat, Tomato..."
+                              />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 140 }}>
+                              <Field
+                                label={`Area (${zone.areaUnit || areaUnit})`}
+                                type="number"
+                                min="0.1"
+                                step="0.1"
+                                value={editZoneArea}
+                                onChange={(e) => setEditZoneArea(e.target.value)}
+                                placeholder="e.g. 2.5"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              disabled={savingEditZone}
+                              onClick={async () => {
+                                setZoneError("")
+                                if (editZoneArea && (!Number.isFinite(Number(editZoneArea)) || Number(editZoneArea) <= 0)) {
+                                  setZoneError("Zone area must be a positive number.")
+                                  return
+                                }
+                                setSavingEditZone(true)
+                                try {
+                                  await updateZone(zId, {
+                                    crop: editZoneCrop.trim(),
+                                    ...(editZoneArea ? { area: Number(editZoneArea), areaUnit: zone.areaUnit || areaUnit } : {}),
+                                  })
+                                  setEditingZoneId(null)
+                                  notify("Zone updated successfully.")
+                                } catch (err) {
+                                  setZoneError(err.message || "Failed to update zone.")
+                                } finally {
+                                  setSavingEditZone(false)
+                                }
+                              }}
+                              style={{
+                                background: "#2E7D32",
+                                color: "white",
+                                border: "none",
+                                borderRadius: 8,
+                                padding: "9px 16px",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: savingEditZone ? "not-allowed" : "pointer",
+                                height: 38,
+                              }}
+                            >
+                              {savingEditZone ? "Saving…" : "Save Changes"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
               )}
               <form
                 noValidate
@@ -456,15 +549,11 @@ export default function SettingsPanel() {
                   }
                   setSavingZone(true)
                   try {
-                    const result = await apiRequest(`/farms/${backendFarmId}/zones`, {
-                      method: "POST",
-                      body: JSON.stringify({
-                        name: zoneName.trim(),
-                        crop: zoneCrop.trim(),
-                        ...(zoneArea ? { area: Number(zoneArea), areaUnit } : {}),
-                      }),
+                    await createZone({
+                      name: zoneName.trim(),
+                      crop: zoneCrop.trim(),
+                      ...(zoneArea ? { area: Number(zoneArea), areaUnit } : {}),
                     })
-                    setBackendZones((current) => [...current, result.zone])
                     setZoneName("")
                     setZoneCrop("")
                     setZoneArea("")

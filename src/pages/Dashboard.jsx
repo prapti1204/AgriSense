@@ -2,7 +2,7 @@ import { Navigate } from "react-router-dom"
 import { useFarm } from "../context/FarmContext"
 import SettingsPanel from "../components/dashboard/SettingsPanel"
 import FarmMapPanel from "../components/dashboard/FarmMapPanel"
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Routes, Route, useNavigate, useLocation } from "react-router-dom"
 import { useTheme } from "../context/ThemeContext"
 import {
@@ -42,7 +42,7 @@ const navItems = [
   { id: "irrigation", label: "Irrigation", icon: Droplets, path: "irrigation" },
   { id: "pest", label: "Pest Detection", icon: Bug, path: "pest" },
   { id: "yield", label: "Yield Prediction", icon: BarChart3, path: "yield" },
-  { id: "alerts", label: "Alerts", icon: Bell, path: "alerts", badge: 4 },
+  { id: "alerts", label: "Alerts", icon: Bell, path: "alerts" },
   { id: "reports", label: "Reports", icon: FileText, path: "reports" },
   { id: "map", label: "Farm Map", icon: Map, path: "map" },
   { id: "settings", label: "Settings", icon: Settings, path: "settings" },
@@ -53,8 +53,38 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768)
-  const { dismissed, farm } = useFarm()
-  const alertCount = Math.max(0, 4 - dismissed.filter((id) => id <= 4).length)
+  const { dismissed, farm, hasFarm, getFarmAlerts, getFarmWeather } = useFarm()
+
+  // Alert badge: derived from real active alert count
+  const [liveAlertCount, setLiveAlertCount] = useState(0)
+  const alertFetchedRef = useRef(false)
+  useEffect(() => {
+    if (!hasFarm) { setLiveAlertCount(0); return }
+    // Fetch once per farm load; AlertsPanel also fetches on its own mount
+    let active = true
+    getFarmAlerts()
+      .then((res) => {
+        if (!active) return
+        const total = (res.alerts || []).filter((a) => !dismissed.includes(a.id)).length
+        setLiveAlertCount(total)
+        alertFetchedRef.current = true
+      })
+      .catch(() => { if (active) setLiveAlertCount(0) })
+    return () => { active = false }
+  }, [hasFarm, getFarmAlerts, dismissed])
+
+  const alertCount = liveAlertCount
+
+  // Header weather chip: real data from selected farm
+  const [headerWeather, setHeaderWeather] = useState(null)
+  useEffect(() => {
+    if (!hasFarm) { setHeaderWeather(null); return }
+    let active = true
+    getFarmWeather()
+      .then((res) => { if (active && res?.weather?.current) setHeaderWeather(res.weather.current) })
+      .catch(() => { if (active) setHeaderWeather(null) })
+    return () => { active = false }
+  }, [hasFarm, getFarmWeather])
   const [searchQuery, setSearchQuery] = useState("")
   const searchResults = navItems.filter((item) =>
     item.label.toLowerCase().includes(searchQuery.toLowerCase()),
@@ -197,7 +227,7 @@ export default function Dashboard() {
               >
                 <Icon size={16} />
                 <span style={{ whiteSpace: "nowrap" }}>{item.label}</span>
-                {item.badge && alertCount > 0 && (
+                {item.id === "alerts" && alertCount > 0 && (
                   <span
                     style={{
                       marginLeft: "auto",
@@ -264,7 +294,7 @@ export default function Dashboard() {
               >
                 <Icon size={16} />
                 <span style={{ whiteSpace: "nowrap" }}>{item.label}</span>
-                {item.badge && alertCount > 0 && (
+                {item.id === "alerts" && alertCount > 0 && (
                   <span
                     style={{
                       marginLeft: "auto",
@@ -483,25 +513,31 @@ export default function Dashboard() {
               gap: 8,
             }}
           >
-            {/* Weather mini */}
-            <div
-              className="weather-mini"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "6px 12px",
-                borderRadius: 8,
-                background: isDark ? "#1E2E1E" : "#EBF5E9",
-                border: `1px solid ${border}`,
-              }}
-            >
-              <Thermometer size={13} color="#E53935" />
-              <span style={{ fontSize: 13, fontWeight: 600, color: text }}>
-                28°C
-              </span>
-              <span style={{ fontSize: 11, color: muted }}>Partly Cloudy</span>
-            </div>
+            {/* Weather mini — real data from selected farm */}
+            {headerWeather ? (
+              <div
+                className="weather-mini"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "6px 12px",
+                  borderRadius: 8,
+                  background: isDark ? "#1E2E1E" : "#EBF5E9",
+                  border: `1px solid ${border}`,
+                }}
+              >
+                <Thermometer size={13} color="#E53935" />
+                <span style={{ fontSize: 13, fontWeight: 600, color: text }}>
+                  {Math.round(headerWeather.temperature_2m)}°C
+                </span>
+                <span style={{ fontSize: 11, color: muted }}>
+                  {headerWeather.relative_humidity_2m != null
+                    ? `${headerWeather.relative_humidity_2m}% humidity`
+                    : "Weather live"}
+                </span>
+              </div>
+            ) : null}
 
             {/* Alerts bell */}
             <button
